@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recipes UI</title>
+  <style>
+    body { font-family: Arial; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+    th, td { border: 1px solid #ccc; padding: 8px; }
+    th { background: #f5f5f5; }
+    tbody tr:nth-child(odd) { background: #fafafa; }
+    tbody tr:nth-child(even) { background: #f0f0f0; }
+    tbody tr:hover { background: #e6e6e6; cursor: pointer; }
+
+    /* ⭐ Title truncate requirement */
+    td.title-cell {
+        max-width: 180px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    #details {
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 350px;
+      height: 100vh;
+      background: white;
+      border-left: 2px solid #ddd;
+      padding: 20px;
+      display: none;
+      overflow-y: auto;
+    }
+    .fallback { color: red; margin-top: 10px; }
+    .pagination-controls { margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<h2>Recipes</h2>
+
+<!-- Filters -->
+<div>
+  <input id="title" placeholder="Search Title">
+  <input id="cuisine" placeholder="Cuisine">
+  <input id="rating" type="number" step="0.1" placeholder="Min Rating">
+  <br><br>
+  <input id="calories" placeholder="Calories (<=300)">
+  <input id="carbs" placeholder="Carbs (<40)">
+  <input id="protein" placeholder="Protein (>=10)">
+  <input id="fat" placeholder="Fat (<=20)">
+  <input id="sugar" placeholder="Sugar (<15)">
+  <input id="fiber" placeholder="Fiber (>=5)">
+  <input id="sodium" placeholder="Sodium (<=200)">
+  <button onclick="clearFilters()">Clear Filters</button>
+  <button type="button" onclick="searchRecipes()">Search</button>
+</div>
+
+<!-- Fallback -->
+<div id="fallback" class="fallback"></div>
+
+<!-- Table -->
+<table id="recipeTable">
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Cuisine</th>
+      <th>Rating</th>
+      <th>Total Time</th>
+      <th>Serves</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<div class="pagination-controls">
+  <button type="button" id="prevPage">Previous</button>
+  <button type="button" id="nextPage">Next</button>
+  <span>Page: <span id="currentPage">1</span></span>
+</div>
+
+
+<!-- Drawer -->
+<div id="details"></div>
+
+<script>
+
+/* ⭐ Convert rating to stars */
+function stars(x) {
+    const full = Math.floor(x);
+    let s = "★".repeat(full);
+    if (x - full >= 0.5) s += "½";
+    return s;
+}
+
+/* ⭐ Expandable total time */
+function toggleTime() {
+    const t = document.getElementById("timeExpand");
+    t.style.display = (t.style.display === "none") ? "block" : "none";
+}
+
+
+/* -------------------------
+   DETAILS DRAWER
+--------------------------*/
+async function openDetails(title) {
+  const res = await fetch(`http://127.0.0.1:8000/api/recipes/search?title=${title}`);
+  const data = await res.json();
+  const details = document.getElementById("details");
+
+  if (!data || !data.length) return;
+
+  const r = data[0];
+  const n = JSON.parse(r.nutrients);
+
+  details.style.display = "block";
+  details.innerHTML = `
+    <h3>${r.title}</h3>
+    <p><b>Cuisine:</b> ${r.cuisine}</p>
+    <p><b>Description:</b> ${r.description}</p>
+
+    <div onclick="toggleTime()" style="cursor:pointer;">
+      <b>Total Time:</b> ${r.total_time} mins ▸
+    </div>
+
+    <div id="timeExpand" style="display:none; margin-left:10px;">
+      <p><b>Prep Time:</b> ${r.prep_time}</p>
+      <p><b>Cook Time:</b> ${r.cook_time}</p>
+    </div>
+
+    <h4>Nutrition</h4>
+    <table>
+      <tr><td>Calories</td><td>${n.calories}</td></tr>
+      <tr><td>Carbs</td><td>${n.carbohydrateContent}</td></tr>
+      <tr><td>Protein</td><td>${n.proteinContent}</td></tr>
+      <tr><td>Fiber</td><td>${n.fiberContent}</td></tr>
+      <tr><td>Fat</td><td>${n.fatContent}</td></tr>
+      <tr><td>Sodium</td><td>${n.sodiumContent}</td></tr>
+      <tr><td>Sugar</td><td>${n.sugarContent}</td></tr>
+    </table>
+
+    <button onclick="details.style.display='none'">Close</button>
+  `;
+}
+
+
+/* -------------------------
+   LOAD RECIPES (pagination)
+--------------------------*/
+let currentPage = 1;
+const limit = 10;
+
+async function loadRecipes(page = 1) {
+  const res = await fetch(`http://127.0.0.1:8000/api/recipes?page=${page}&limit=${limit}`);
+  const data = await res.json();
+
+  const table = document.querySelector("#recipeTable tbody");
+  const fallback = document.getElementById("fallback");
+
+  table.innerHTML = "";
+  fallback.innerHTML = `Showing ${data.length} recipes`;
+
+  if (!data || data.length === 0) {
+    fallback.innerText = "No recipes found.";
+    return;
+  }
+
+  data.forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td class="title-cell">${item.title}</td>
+      <td>${item.cuisine}</td>
+      <td>${stars(item.rating)}</td>
+      <td>${item.total_time}</td>
+      <td>${item.serves}</td>
+    `;
+    row.onclick = () => openDetails(item.title);
+    table.appendChild(row);
+  });
+
+  document.getElementById("currentPage").innerText = page;
+}
+
+
+/* -------------------------
+   SEARCH
+--------------------------*/
+async function searchRecipes(page = 1) {
+  const title = document.getElementById("title").value;
+  const cuisine = document.getElementById("cuisine").value;
+  const rating = document.getElementById("rating").value;
+  const calories = document.getElementById("calories").value;
+  const carbs = document.getElementById("carbs").value;
+  const protein = document.getElementById("protein").value;
+  const fat = document.getElementById("fat").value;
+  const sugar = document.getElementById("sugar").value;
+  const fiber = document.getElementById("fiber").value;
+  const sodium = document.getElementById("sodium").value;
+
+  let url = `http://127.0.0.1:8000/api/recipes/search?page=${page}`;
+
+  if (title) url += `&title=${title}`;
+  if (cuisine) url += `&cuisine=${cuisine}`;
+  if (rating) url += `&rating=${rating}`;
+  if (calories) url += `&calories=${calories}`;
+  if (carbs) url += `&carbohydrateContent=${carbs}`;
+  if (protein) url += `&proteinContent=${protein}`;
+  if (fat) url += `&fatContent=${fat}`;
+  if (sugar) url += `&sugarContent=${sugar}`;
+  if (fiber) url += `&fiberContent=${fiber}`;
+  if (sodium) url += `&sodiumContent=${sodium}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  const table = document.querySelector("#recipeTable tbody");
+  const fallback = document.getElementById("fallback");
+  table.innerHTML = "";
+  fallback.innerHTML = `Found ${data.length} matching recipes`;
+
+  if (!data || data.length === 0) {
+    fallback.innerText = "No results found.";
+    return;
+  }
+
+  data.forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td class="title-cell">${item.title}</td>
+      <td>${item.cuisine}</td>
+      <td>${stars(item.rating)}</td>
+      <td>${item.total_time}</td>
+      <td>${item.serves}</td>
+    `;
+    row.onclick = () => openDetails(item.title);
+    table.appendChild(row);
+  });
+}
+
+
+/* -------------------------
+   PAGINATION BUTTONS
+--------------------------*/
+document.getElementById("prevPage").onclick = () => {
+    if (currentPage > 1) {
+        currentPage--;
+        loadRecipes(currentPage);
+    }
+};
+
+document.getElementById("nextPage").onclick = () => {
+    currentPage++;
+    loadRecipes(currentPage);
+};
+
+
+/* -------------------------
+   CLEAR FILTERS
+--------------------------*/
+function clearFilters() {
+  document.querySelectorAll("input").forEach(i => i.value = "");
+  loadRecipes(1);
+}
+
+loadRecipes();
+
+</script>
+
+</body>
+</html>
